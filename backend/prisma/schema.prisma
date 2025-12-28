@@ -96,6 +96,6 @@ model Complaint {
   studentId   String?
   createdAt   DateTime  @default(now())
   resolvedAt  DateTime?
-  student     Student?  @relation(fields: [studentId], references: [id])
-  room        Room      @relation(fields: [roomId], references: [id])
 }
+
+//try4
