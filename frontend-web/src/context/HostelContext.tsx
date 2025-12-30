@@ -19,11 +19,17 @@ interface HostelContextType {
   logout: () => void;
   addResident: (resident: Resident) => void;
   updateBedStatus: (bedId: string, isOccupied: boolean, resident?: Resident) => void;
-  addRoom: (floorId: string, roomNumber: string, bedCount: number) => void;
+  addRoom: (floorId: string, roomNumber: string, bedCount: number) => boolean;
   updateRoomBeds: (roomId: string, bedCount: number) => void;
   addComplaint: (complaint: Omit<Complaint, 'id' | 'createdAt'>) => void;
   updateComplaintStatus: (complaintId: string, status: Complaint['status']) => void;
   getOccupancyStats: () => { total: number; occupied: number; available: number };
+  addFloor: (propertyId: string) => void;
+  removeFloor: (propertyId: string, floorId: string) => boolean;
+  removeRoom: (floorId: string, roomId: string) => boolean;
+  addBed: (roomId: string) => void;
+  removeBed: (roomId: string, bedId: string) => boolean;
+  vacateBed: (bedId: string) => void;
 }
 
 const HostelContext = createContext<HostelContextType | undefined>(undefined);
@@ -320,7 +326,21 @@ export function HostelProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  const addRoom = (floorId: string, roomNumber: string, bedCount: number) => {
+  const addRoom = (floorId: string, roomNumber: string, bedCount: number): boolean => {
+    // Check if room number already exists across entire property
+    const property = properties.find(p => 
+      p.floors.some(f => f.id === floorId)
+    );
+    if (!property) return false;
+
+    const roomExists = property.floors.some(floor =>
+      floor.rooms.some(room => room.number === roomNumber)
+    );
+
+    if (roomExists) {
+      return false; // Room number already exists
+    }
+
     const newRoomId = `room-${Date.now()}`;
     const newBeds: Bed[] = Array.from({ length: bedCount }, (_, i) => ({
       id: `bed-${newRoomId}-${i + 1}`,
@@ -346,6 +366,8 @@ export function HostelProvider({ children }: { children: ReactNode }) {
         })
       }));
     });
+
+    return true; // Success
   };
 
   const updateRoomBeds = (roomId: string, bedCount: number) => {
@@ -364,12 +386,18 @@ export function HostelProvider({ children }: { children: ReactNode }) {
               return room;
             }
 
+            // Preserve existing beds (with their resident data) and renumber them sequentially
             const newBeds: Bed[] = [];
             for (let i = 0; i < bedCount; i++) {
               const existingBed = currentBeds[i];
               if (existingBed) {
-                newBeds.push(existingBed);
+                // Preserve existing bed with all its data (including resident), but update number
+                newBeds.push({
+                  ...existingBed,
+                  number: i + 1
+                });
               } else {
+                // Add new empty bed
                 newBeds.push({
                   id: `bed-${roomId}-${Date.now()}-${i}`,
                   number: i + 1,
@@ -424,6 +452,187 @@ export function HostelProvider({ children }: { children: ReactNode }) {
     return { total, occupied, available: total - occupied };
   };
 
+  const addFloor = (propertyId: string) => {
+    setProperties(prev => {
+      return prev.map(property => {
+        if (property.id !== propertyId) return property;
+        
+        // Find the highest floor number and add 1
+        const maxFloorNumber = property.floors.length > 0
+          ? Math.max(...property.floors.map(f => f.number))
+          : 0;
+        const newFloorNumber = maxFloorNumber + 1;
+        
+        const newFloor: Floor = {
+          id: `floor-${Date.now()}`,
+          number: newFloorNumber,
+          propertyId,
+          rooms: []
+        };
+        
+        return {
+          ...property,
+          floors: [...property.floors, newFloor]
+        };
+      });
+    });
+  };
+
+  const removeFloor = (propertyId: string, floorId: string): boolean => {
+    // Check if floor has any occupied beds
+    const property = properties.find(p => p.id === propertyId);
+    if (!property) return false;
+    
+    const floor = property.floors.find(f => f.id === floorId);
+    if (!floor) return false;
+    
+    const hasOccupiedBeds = floor.rooms.some(room =>
+      room.beds.some(bed => bed.isOccupied)
+    );
+    
+    if (hasOccupiedBeds) {
+      return false; // Cannot remove floor with occupied beds
+    }
+    
+    setProperties(prev => {
+      return prev.map(property => {
+        if (property.id !== propertyId) return property;
+        return {
+          ...property,
+          floors: property.floors.filter(f => f.id !== floorId)
+        };
+      });
+    });
+    
+    return true;
+  };
+
+  const removeRoom = (floorId: string, roomId: string): boolean => {
+    // Check if room has any occupied beds
+    const property = properties.find(p => 
+      p.floors.some(f => f.id === floorId)
+    );
+    if (!property) return false;
+    
+    const floor = property.floors.find(f => f.id === floorId);
+    if (!floor) return false;
+    
+    const room = floor.rooms.find(r => r.id === roomId);
+    if (!room) return false;
+    
+    const hasOccupiedBeds = room.beds.some(bed => bed.isOccupied);
+    if (hasOccupiedBeds) {
+      return false; // Cannot remove room with occupied beds
+    }
+    
+    setProperties(prev => {
+      return prev.map(property => ({
+        ...property,
+        floors: property.floors.map(floor => {
+          if (floor.id !== floorId) return floor;
+          return {
+            ...floor,
+            rooms: floor.rooms.filter(r => r.id !== roomId)
+          };
+        })
+      }));
+    });
+    
+    return true;
+  };
+
+  const addBed = (roomId: string) => {
+    setProperties(prev => {
+      return prev.map(property => ({
+        ...property,
+        floors: property.floors.map(floor => ({
+          ...floor,
+          rooms: floor.rooms.map(room => {
+            if (room.id !== roomId) return room;
+            const newBedNumber = room.beds.length + 1;
+            const newBed: Bed = {
+              id: `bed-${roomId}-${Date.now()}-${newBedNumber}`,
+              number: newBedNumber,
+              roomId,
+              isOccupied: false
+            };
+            return {
+              ...room,
+              beds: [...room.beds, newBed]
+            };
+          })
+        }))
+      }));
+    });
+  };
+
+  const removeBed = (roomId: string, bedId: string): boolean => {
+    // Check if bed is occupied
+    const property = properties.find(p =>
+      p.floors.some(f =>
+        f.rooms.some(r => r.id === roomId && r.beds.some(b => b.id === bedId))
+      )
+    );
+    if (!property) return false;
+    
+    const floor = property.floors.find(f =>
+      f.rooms.some(r => r.id === roomId)
+    );
+    if (!floor) return false;
+    
+    const room = floor.rooms.find(r => r.id === roomId);
+    if (!room) return false;
+    
+    const bed = room.beds.find(b => b.id === bedId);
+    if (!bed || bed.isOccupied) {
+      return false; // Cannot remove occupied bed
+    }
+    
+    setProperties(prev => {
+      return prev.map(property => ({
+        ...property,
+        floors: property.floors.map(floor => ({
+          ...floor,
+          rooms: floor.rooms.map(room => {
+            if (room.id !== roomId) return room;
+            // Re-number remaining beds
+            const remainingBeds = room.beds
+              .filter(b => b.id !== bedId)
+              .map((b, index) => ({ ...b, number: index + 1 }));
+            return {
+              ...room,
+              beds: remainingBeds
+            };
+          })
+        }))
+      }));
+    });
+    
+    return true;
+  };
+
+  const vacateBed = (bedId: string) => {
+    setProperties(prev => {
+      return prev.map(property => ({
+        ...property,
+        floors: property.floors.map(floor => ({
+          ...floor,
+          rooms: floor.rooms.map(room => ({
+            ...room,
+            beds: room.beds.map(bed => {
+              if (bed.id !== bedId) return bed;
+              return {
+                ...bed,
+                isOccupied: false,
+                resident: undefined
+              };
+            })
+          }))
+        }))
+      }));
+    });
+  };
+
   return (
     <HostelContext.Provider value={{
       user,
@@ -439,7 +648,13 @@ export function HostelProvider({ children }: { children: ReactNode }) {
       updateRoomBeds,
       addComplaint,
       updateComplaintStatus,
-      getOccupancyStats
+      getOccupancyStats,
+      addFloor,
+      removeFloor,
+      removeRoom,
+      addBed,
+      removeBed,
+      vacateBed
     }}>
       {children}
     </HostelContext.Provider>

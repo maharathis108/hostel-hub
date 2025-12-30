@@ -28,17 +28,24 @@ export default function RoomManagement() {
       return;
     }
 
-    addRoom(selectedFloorId, newRoomNumber, newRoomBeds);
+    const success = addRoom(selectedFloorId, newRoomNumber, newRoomBeds);
     
-    toast({
-      title: 'Room Added',
-      description: `Room ${newRoomNumber} with ${newRoomBeds} beds has been added.`,
-    });
-
-    setShowAddRoomModal(false);
-    setNewRoomNumber('');
-    setNewRoomBeds(2);
-    setSelectedFloorId(null);
+    if (success) {
+      toast({
+        title: 'Room Added',
+        description: `Room ${newRoomNumber} with ${newRoomBeds} beds has been added.`,
+      });
+      setShowAddRoomModal(false);
+      setNewRoomNumber('');
+      setNewRoomBeds(2);
+      setSelectedFloorId(null);
+    } else {
+      toast({
+        title: 'Room Already Exists',
+        description: `Room ${newRoomNumber} already exists in this property.`,
+        variant: 'destructive'
+      });
+    }
   };
 
   const handleUpdateBeds = (roomId: string, newBedCount: number) => {

@@ -1,8 +1,20 @@
 import { useState } from 'react';
-import { X, User, Phone, Mail, Calendar, CreditCard, Clock } from 'lucide-react';
+import { X, User, Phone, Mail, Calendar, CreditCard, Clock, LogOut } from 'lucide-react';
 import { Resident } from '@/types/hostel';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { useHostel } from '@/context/HostelContext';
+import { useToast } from '@/hooks/use-toast';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 interface ResidentInfoModalProps {
   isOpen: boolean;
@@ -11,7 +23,25 @@ interface ResidentInfoModalProps {
 }
 
 export function ResidentInfoModal({ isOpen, onClose, resident }: ResidentInfoModalProps) {
+  const { vacateBed, properties } = useHostel();
+  const { toast } = useToast();
+  const [showVacateDialog, setShowVacateDialog] = useState(false);
+
   if (!isOpen) return null;
+
+  // Get room number from properties
+  const getRoomNumber = (): string => {
+    const property = properties.find(p => p.id === resident.propertyId);
+    if (!property) return resident.roomId;
+    
+    for (const floor of property.floors) {
+      const room = floor.rooms.find(r => r.id === resident.roomId);
+      if (room) return room.number;
+    }
+    return resident.roomId;
+  };
+
+  const roomNumber = getRoomNumber();
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-IN', {
@@ -32,6 +62,16 @@ export function ResidentInfoModal({ isOpen, onClose, resident }: ResidentInfoMod
       default:
         return null;
     }
+  };
+
+  const handleVacateBed = () => {
+    vacateBed(resident.bedId);
+    toast({
+      title: 'Bed Vacated',
+      description: `${resident.name} has been removed from Room ${roomNumber}. The bed is now available.`,
+    });
+    setShowVacateDialog(false);
+    onClose();
   };
 
   return (
@@ -141,12 +181,42 @@ export function ResidentInfoModal({ isOpen, onClose, resident }: ResidentInfoMod
           </div>
         </div>
 
-        <div className="p-6 border-t border-border">
-          <Button onClick={onClose} variant="outline" className="w-full">
+        <div className="p-6 border-t border-border flex gap-3">
+          <Button
+            onClick={() => setShowVacateDialog(true)}
+            variant="destructive"
+            className="flex-1"
+          >
+            <LogOut className="w-4 h-4 mr-2" />
+            Vacate Bed
+          </Button>
+          <Button onClick={onClose} variant="outline" className="flex-1">
             Close
           </Button>
         </div>
       </div>
+
+      {/* Vacate Bed Confirmation Dialog */}
+      <AlertDialog open={showVacateDialog} onOpenChange={setShowVacateDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will vacate the bed for <strong>{resident.name}</strong> in Room {roomNumber}. 
+              The bed will be marked as available and the resident data will be removed. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleVacateBed}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Vacate Bed
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
